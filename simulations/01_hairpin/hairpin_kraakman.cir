@@ -1,0 +1,65 @@
+* hairpin_kraakman.cir — SPICE netlist for Tesla Hairpin per Kraakman/waveguide.blog (2017)
+*
+* Topology:  NST (15 kV / 30 mA / 50 Hz) → MMC (40 kV / 2 nF) → spark gap →
+*            two parallel copper bus bars (22 mm OD, 220 cm long, U-shape).
+*
+* Run with:
+*   ngspice hairpin_kraakman.cir
+* or open in LTspice (File → Open → choose this .cir).
+*
+* This is a starting point. After Stage 0 calibration, replace .param values
+* with the real ones measured for your NST and MMC.
+
+.title Tesla Hairpin Resonator (Kraakman replica)
+
+* ── Parameters ────────────────────────────────────────────────────────
+.param Vnst_rms = 15000      ; NST output RMS [V]
+.param Cmmc     = 2n         ; MMC capacitance [F]  (40 kV / 2000 pF)
+.param Lbus     = 5u         ; Bus bar self-inductance [H]  (≈5 μH per arm)
+.param Cbus     = 100p       ; Stray capacitance bus-to-bus [F]
+.param Rbus     = 0.05       ; Skin-effect resistance at 50 kHz [Ω]
+.param Vgap_on  = 8000       ; Spark gap fire voltage [V]
+.param Vgap_off = 1500       ; Spark gap quench voltage [V]
+.param Rgap_on  = 0.05       ; Plasma resistance [Ω]
+.param Rgap_off = 1Meg       ; Open gap [Ω]
+
+* ── HV source: 15 kV RMS at 50 Hz ─────────────────────────────────────
+* RMS=15000 → peak=21213
+Vnst nst_hi 0 SIN(0 21213 50 0 0 0)
+Rnst nst_hi nst_lim 1k       ; current limiting resistor (NST internal)
+
+* ── MMC primary capacitor ─────────────────────────────────────────────
+Cmmc nst_lim spark_a {Cmmc} IC=0
+
+* ── Spark gap (modeled as voltage-controlled switch with hysteresis) ──
+Sgap spark_a spark_b spark_a spark_b SWMOD
+.model SWMOD SW(Ron={Rgap_on} Roff={Rgap_off} Vt={Vgap_off} Vh={Vgap_on - Vgap_off})
+
+* ── Bus bar 1 (U-shaped copper tube, two arms) ────────────────────────
+Lbus1a spark_b bus1_a {Lbus}
+Rbus1a bus1_a bus1_b {Rbus}
+Lbus1b bus1_b bus1_c {Lbus}
+* Bus bar 2 (return)
+Rbus2 spark_b_ret bus2_b {Rbus}
+Lbus2 bus2_b bus2_c {Lbus}
+
+* Stray capacitance between bars (distributed)
+Cbus1 bus1_a bus2_b {Cbus}
+Cbus2 bus1_b bus2_b {Cbus}
+Cbus3 bus1_c bus2_c {Cbus}
+
+* Bus bars short at the U bend (return path)
+Rshort spark_a spark_b_ret 1m
+
+* ── Resistive load (calorimeter resistor: 1 kΩ / 100 W ceramic) ──────
+* Connected near the standing-wave antinode (bus end)
+Rload bus1_c 0 1k
+
+* ── Analysis ──────────────────────────────────────────────────────────
+.tran 1u 100m 0 100n
+.print tran V(nst_hi) V(spark_a) V(spark_b) V(bus1_a) V(bus1_c) I(Rload)
+
+* Frequency response (small-signal AC — for finding resonance)
+.ac dec 100 1k 1Meg
+
+.end

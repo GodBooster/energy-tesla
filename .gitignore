@@ -1,0 +1,35 @@
+# macOS
+.DS_Store
+._*
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+.ipynb_checkpoints/
+
+# Jupyter
+*.ipynb_checkpoints
+
+# LTspice
+*.raw
+*.log
+*.net
+*.op.raw
+
+# Large raw measurement data — store separately if needed
+measurements/raw/*.csv
+measurements/raw/*.bin
+data/raw/*.csv
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*~
+
+# OS
+Thumbs.db

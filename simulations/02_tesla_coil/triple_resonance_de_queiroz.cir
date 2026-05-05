@@ -1,0 +1,90 @@
+* triple_resonance_de_queiroz.cir — SPICE netlist for Tesla coil with
+* (a,b,c) = (3,4,5), k = 0.28, full energy transfer in 2 cycles.
+*
+* Geometry per coil_geometry_optimizer.py output:
+*   Ns = 1600 turns, Rs = 57 mm, Hs = 570 mm, single-layer solenoid
+*   Ls = 52.7 mH (Wheeler formula in inches)
+*   Toroid D = 40 cm, d = 5 cm → Ctl = 74 pF
+*   f_secondary = 80.5 kHz
+*   Lp = 207.7 μH (15-turn flat spiral, Rp_avg = 192 mm)
+*   Ctc = 17.5 nF (MMC)
+*
+* For 3-coil magnifier (extra coil), set k_23 and add L3, C3 parameters.
+* Below is the 2-coil Tesla coil with grounding option for A/B/C test.
+
+.title Tesla Coil — Triple Resonance / de Queiroz k=0.28
+
+* ── Parameters ────────────────────────────────────────────────────────
+.param Lp       = 207.7u
+.param Ls       = 52.7m
+.param Ctc      = 17.5n
+.param Ctl      = 74p
+.param k        = 0.28        ; coupling coefficient (de Queiroz)
+.param Rp       = 0.1         ; primary resistance (skin-effect)
+.param Rs       = 80          ; secondary DC resistance + skin loss
+.param Vnst_pk  = 21213       ; 15 kV RMS
+
+* Spark gap parameters
+.param Vgap_on  = 12000
+.param Vgap_off = 2000
+
+* Grounding configuration (set rg=1m for A, rg=1Meg for C)
+.param rg       = 5           ; deep low-impedance ground (Ω)
+.param Lg       = 1u          ; ground lead inductance
+.param Cg_chassis = 50p       ; parasitic capacitance to chassis
+
+* ── HV source: NST ────────────────────────────────────────────────────
+Vnst hv_in 0 SIN(0 {Vnst_pk} 50 0 0 0)
+Rnst hv_in mmc_in 1k
+
+* ── MMC ──────────────────────────────────────────────────────────────
+Cmmc mmc_in spark_pri {Ctc} IC=0
+
+* ── Spark gap ────────────────────────────────────────────────────────
+Sgap spark_pri spark_pri_ret spark_pri spark_pri_ret SWMOD
+.model SWMOD SW(Ron=0.05 Roff=1Meg Vt={Vgap_off} Vh={Vgap_on - Vgap_off})
+
+* ── Primary coil (with skin loss) ────────────────────────────────────
+Rprim spark_pri_ret prim_a {Rp}
+Lprim prim_a 0 {Lp}
+
+* ── Secondary coil (with stray RG) ───────────────────────────────────
+Rsec  sec_top sec_a {Rs}
+Lsec  sec_a sec_base {Ls}
+
+* Top load capacitor (toroid to ground/atmosphere)
+Ctop sec_top sec_top_g {Ctl}
+
+* Magnetic coupling Lprim ↔ Lsec
+Kcoup Lprim Lsec {k}
+
+* ── Grounding circuit (this is the variable to test) ─────────────────
+* Configuration A (deep ground): rg=5 Ω
+* Configuration B (with ammeter): add Rmeas in series, rg=5 Ω
+* Configuration C (floating):   rg=1Meg
+Rground sec_base ground_node {rg}
+Lground ground_node 0 {Lg}
+
+* Capacitive path of top load to chassis (always present)
+Cchassis sec_top_g 0 {Cg_chassis}
+
+* Optional: ground current ammeter (use small resistance, measure I)
+Rmeas ground_node 0 0.001
+
+* ── Resistive load (calorimeter resistor) ────────────────────────────
+* 5 kΩ / 100W ceramic resistor, connected from top to ground
+* (Common Tesla coil load topology)
+* For A/B/C test, swap configurations by varying rg
+Rload sec_top 0 5k
+
+* ── Analysis ──────────────────────────────────────────────────────────
+.tran 0.5u 50m 0 0.1u UIC
+.print tran V(sec_top) V(prim_a) V(spark_pri) I(Rload) I(Rground)
+
+* AC sweep to find resonance
+.ac dec 100 10k 1Meg
+
+* Optional: parametric sweep on coupling
+* .step param k LIST 0.1 0.18 0.28 0.385 0.6
+
+.end
