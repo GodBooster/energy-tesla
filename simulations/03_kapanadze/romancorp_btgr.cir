@@ -1,0 +1,132 @@
+* romancorp_btgr.cir — SPICE netlist for Romancorp БТГР / Romanov-style BTG
+*
+* Topology: Push-pull driver → Primary LC (L1+C1) → Tesla coil coupling k →
+*           Secondary LC (L2+C_ctl) → Quarter-wave stub L4 → Ground (variable Rg)
+*           Load Rload on secondary output
+*
+* Reference schematics: БТГР.png, БТГР по варианту А1R1.jpg (external_corpus)
+* Theory: theory/romancorp_btgr_decomposition.md
+* Relation to Tesla coil: same de Queiroz (3,4,5) triple resonance as
+*   simulations/02_tesla_coil/triple_resonance_de_queiroz.cir but with
+*   push-pull electronic driver instead of spark gap + NST.
+*
+* Run with:
+*   ngspice romancorp_btgr.cir
+*   LTspice: File → Open
+
+.title Romancorp БТГР — Push-pull Tesla (de Queiroz k=0.28)
+
+* ── Parameters ─────────────────────────────────────────────────────────────
+* Primary coil — low-inductance flat spiral (L1 in БТГР notation)
+.param Lp       = 207.7u         ; primary inductance [H]  (same as Tesla coil design)
+.param Rp       = 0.1            ; primary DC+skin resistance [Ω]
+
+* Primary tank capacitor (MMC or polypropylene)
+.param Ctc      = 17.5n          ; primary cap [F]
+
+* Secondary coil (L2 in БТГР notation)
+.param Ls       = 52.7m          ; secondary inductance [H]
+.param Rs       = 80             ; secondary resistance [Ω]
+
+* Top-load / toroid capacitance (secondary resonance cap)
+.param Ctl      = 74p            ; toroid self-capacitance [F]
+
+* Coupling coefficient (de Queiroz a=3,b=4,c=5 → k=0.28 → 2-cycle full transfer)
+.param k        = 0.28
+
+* Quarter-wave stub L4 (wire resonator, grounded one end)
+* For a wire at 80 kHz: λ = c/f ≈ 3750 m; λ/4 ≈ 937 m → L4 modelled as lumped
+* In practice, L4 = short copper rod/wire acting as current path to Earth
+.param L4       = 10u            ; ground lead + stub inductance [H]
+.param R4       = 0.1            ; stub resistance [Ω]
+
+* Grounding resistance (A/B/C test parameter)
+* Config A (deep ground, rg ≈ 5 Ω):   .param rg = 5
+* Config C (floating, no ground):       .param rg = 1Meg
+.param rg       = 5              ; grounding resistance [Ω]
+
+* Load (calorimeter resistor — replaces TV flyback feedback for Stage 1 test)
+.param Rload    = 5k             ; load resistance [Ω]
+
+* Driver: push-pull square wave (replaces IR2153 + IRFP260N)
+* Vcc = 12 V (battery), frequency matched to primary resonance
+* f_primary = 1/(2π√(Lp·Ctc)) ≈ 80.5 kHz (same as Tesla coil design)
+.param Vcc      = 12             ; battery voltage [V]
+.param f_drv    = 80.5k          ; driver frequency [Hz]
+.param duty     = 0.45           ; duty cycle (0.45 ≈ dead-time included)
+
+* Battery/starter circuit (switches off at t_off after initial trigger)
+.param t_off    = 50m            ; time to cut starter [s]  (50 ms for simulation)
+
+* ── Push-pull driver (ideal square-wave voltage source) ────────────────────
+* In real circuit: IR2153 driving complementary IRFP260N pair
+* Here modelled as bipolar voltage source toggling ±Vcc at f_drv
+* Node drv_hi = push-pull midpoint (connected to L1)
+Vdrv drv_hi 0 PULSE(-{Vcc} {Vcc} 0 10n 10n {duty/f_drv} {1/f_drv})
+
+* Battery supply resistance (internal resistance of 12V battery)
+Rbat bat_node drv_hi 0.2
+
+* Starter cutoff switch (opens at t = t_off)
+* In real БТГР, this is the latching relay or SCR triggered by ОЗ signal
+Scutoff bat_node 0 vcontrol 0 CUTMOD
+.model CUTMOD SW(Ron=0.01 Roff=1Meg Vt=0.5 Vh=0.1)
+* Control voltage: 1V for t<t_off (closed), 0V for t>t_off (open)
+Vcontrol vcontrol 0 PWL(0 1 {t_off-1n} 1 {t_off} 0)
+
+* ── Primary circuit ─────────────────────────────────────────────────────────
+Rprim1 drv_hi prim_a {Rp}
+Lprim  prim_a prim_b {Lp}
+Rprim2 prim_b 0 0.001            ; milliohm shunt for current sensing
+
+* Primary tank capacitor (resonance C)
+Ctank  prim_a prim_b {Ctc}
+
+* ── Magnetic coupling to secondary ─────────────────────────────────────────
+Kcoup  Lprim Lsec {k}
+
+* ── Secondary circuit ───────────────────────────────────────────────────────
+Rsec   sec_top sec_a {Rs}
+Lsec   sec_a sec_base {Ls}
+
+* Top-load capacitance (toroid)
+Ctop   sec_top gnd_chassis {Ctl}
+
+* Chassis/stray capacitance
+Cstray gnd_chassis 0 50p
+
+* ── Load (calorimeter resistor) ─────────────────────────────────────────────
+* Connected from top terminal to chassis/ground
+* For A/B/C test of grounding: observe Rload power vs Rground configuration
+Rload_meas sec_top 0 {Rload}
+
+* ── Quarter-wave stub + Ground path ────────────────────────────────────────
+* L4 stub: one end to secondary base, other to earth
+RL4    sec_base stub_end {R4}
+Lstub  stub_end 0 {L4}           ; stub inductance to Earth node
+
+* Grounding resistance (the critical test variable)
+Rground sec_base gnd_node {rg}
+Lgnd    gnd_node 0 1u            ; ground lead inductance
+
+* ── Measurement nodes ───────────────────────────────────────────────────────
+* V(sec_top)    — secondary top voltage (high voltage output)
+* V(prim_a)     — primary voltage
+* I(Rprim2)     — primary current (for P_input = V(drv_hi)*I(Lprim))
+* I(Rload_meas) — load current  (for P_output = I²×Rload)
+* I(Rground)    — ground current (for grounding contribution test)
+
+* ── Analysis ────────────────────────────────────────────────────────────────
+.tran 0.5u 100m 0 0.1u UIC
+.print tran V(sec_top) V(prim_a) I(Rload_meas) I(Rground) I(Rprim2)
+
+* AC sweep for resonance verification
+.ac dec 100 10k 1Meg
+
+* Parametric sweep: compare grounded (rg=5) vs floating (rg=1Meg)
+* .step param rg LIST 5 1Meg
+
+* Parametric sweep: coupling coefficient
+* .step param k LIST 0.10 0.18 0.28 0.38 0.60
+
+.end

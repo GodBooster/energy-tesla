@@ -33,3 +33,6 @@ data/raw/*.csv
 
 # OS
 Thumbs.db
+
+# External corpus — local copy only, not committed
+references/external_corpus/
