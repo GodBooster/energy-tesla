@@ -262,6 +262,36 @@ def print_design(d: dict) -> None:
     print()
 
 
+def suggest_for_f_target(
+    f_target_Hz: float,
+    fixed: dict,
+    sec: SecondaryCoilParams,
+    Ctl_pF: float,
+) -> str:
+    """If actual f_secondary is off from f_target, suggest minimal change."""
+    Ls = sec.Ls_henry
+    Ctl = Ctl_pF * 1e-12
+    f_act = resonant_freq_Hz(Ls, Ctl)
+    err = (f_act - f_target_Hz) / f_target_Hz * 100
+
+    # f ∝ 1/√(L·C); Wheeler gives L ∝ N². So:
+    # to lower f by factor X, multiply C by X² OR multiply N by X
+    ratio = f_act / f_target_Hz
+
+    Ns_new = int(round(sec.Ns * ratio))
+    Ctl_new = Ctl_pF * (ratio ** 2)
+    # toroid diameter that gives this Ctl (approx linear scaling for big tor)
+    D_new = fixed.get('toroid_D_cm', 40.0) * (ratio ** 2)
+
+    return (
+        f"\n  ⚙ ПІДБІР ПІД f_target = {f_target_Hz/1000:.1f} кГц:\n"
+        f"     поточна f_secondary = {f_act/1000:.2f} кГц (відхилення {err:+.2f}%)\n"
+        f"     варіант 1: змінити Ns: {sec.Ns} → {Ns_new} (∝ ratio)\n"
+        f"     варіант 2: змінити Ctl_pF: {Ctl_pF:.1f} → {Ctl_new:.1f} пФ\n"
+        f"                (тороїд D: {fixed.get('toroid_D_cm', 40):.0f} → {D_new:.1f} см)\n"
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Design Tesla coil with triple resonance and de Queiroz coupling."
@@ -273,6 +303,8 @@ def main() -> int:
                         help="Toroid outer diameter [cm]")
     parser.add_argument('--toroid-d', type=float, default=5.0,
                         help="Toroid minor (tube) diameter [cm]")
+    parser.add_argument('--f-target', type=float, default=88500,
+                        help="Target resonance frequency [Hz] (default: 88.5 kHz Colorado Springs)")
     parser.add_argument('--cycles', type=int, default=2,
                         help="Target cycles for full energy transfer (1, 2, 3, 4)")
     parser.add_argument('--Vmax', type=float, default=10.0,
@@ -290,6 +322,15 @@ def main() -> int:
     )
 
     print_design(design)
+
+    # Інверсна задача: підказка під f_target
+    sec = SecondaryCoilParams(Ns=args.Ns, Rs_m=args.Rs, Hs_m=args.Hs, wire_d_mm=0.25)
+    print(suggest_for_f_target(
+        f_target_Hz=args.f_target,
+        fixed={'toroid_D_cm': args.toroid_D},
+        sec=sec,
+        Ctl_pF=design['top_load']['Ctl_pF'],
+    ))
     return 0
 
 
